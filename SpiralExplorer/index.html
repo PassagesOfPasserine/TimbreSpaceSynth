@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Timbre Space · Spherical Spiral</title></head>
+<body><div id="app">
+<header><div class="brand"><span class="mark">◎</span><div><h1>TIMBRE SPACE</h1><span>SPHERICAL SPIRAL EXPLORER</span></div></div><div class="header-actions"><button id="demo">Load demo</button><label class="primary file-button">Import WAV<input id="file" type="file" accept=".wav,audio/wav"></label></div></header>
+<main><section class="workspace" aria-label="Interactive 3D spherical spiral"><div id="viewport"></div><div class="scene-caption"><span class="live-dot"></span> SOUND IN THREE DIMENSIONS <small>Drag to orbit · scroll to zoom · right-drag to pan</small></div><div class="scene-footer"><span id="filename">No sound loaded</span><button id="reset">Reset camera</button></div><div id="loading" hidden>Analyzing sound…</div></section>
+<aside><div class="section-title">THE REPRESENTATION <span>01 / 03</span></div><h2>Sound, given shape.</h2><p class="intro">Three properties. One continuous spherical spiral. Explore the geometry of what you hear.</p>
+<div class="mapping"><span class="mapping-icon timbre">∿</span><div><h3>Timbre <em>Deformation</em></h3><p>Harmonics bend and twist the curve.</p></div></div>
+<div class="mapping"><span class="mapping-icon volume">◯</span><div><h3>Volume <em>Size</em></h3><p>RMS amplitude expands the sphere.</p></div></div>
+<div class="mapping"><span class="mapping-icon pitch">↻</span><div><h3>Pitch <em>Rotation</em></h3><p>Fundamental frequency sets its speed.</p></div></div>
+<div class="divider"></div><div class="section-title">SCENE CONTROLS</div>
+<label class="control">Spiral resolution <output id="resolutionValue">4096</output><input id="resolution" type="range" min="512" max="8192" step="256" value="4096"></label>
+<label class="control">Rotation direction<select id="direction"><option value="1">Counterclockwise</option><option value="-1">Clockwise</option></select></label>
+<label class="toggle"><input type="checkbox" id="axes"> Show XYZ axes</label>
+<button id="export" class="wide" disabled>Export extracted features ↓</button>
+<p class="note">This is a deterministic, lossy visualization—not AI morphing or a reversible audio encoding. Audio features are retained independently.</p>
+</aside></main>
+<footer><div class="transport"><button id="play" class="play" disabled aria-label="Play">&#9654;&#65038;</button><div class="time"><span id="current">0:00</span><span id="duration"> / 0:00</span></div><input id="seek" type="range" min="0" max="1" step="0.001" value="0" aria-label="Playback position" disabled></div><div class="meters"><div><span>TIMBRE / CENTROID</span><strong id="centroid">—</strong></div><div><span>VOLUME / RMS</span><strong id="rms">—</strong></div><div><span>PITCH / F₀</span><strong id="pitch">—</strong></div></div></footer>
+<div id="status" role="status">Import a mono or stereo WAV, or load the evolving harmonic demo.</div>
+</div><script type="module" src="/src/main.js"></script></body></html>

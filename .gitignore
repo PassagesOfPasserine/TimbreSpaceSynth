@@ -1,0 +1,6 @@
+/build*/
+/.vs/
+*.user
+/SpiralExplorer/node_modules/
+/SpiralExplorer/dist/
+/SpiralExplorer/test-results/
