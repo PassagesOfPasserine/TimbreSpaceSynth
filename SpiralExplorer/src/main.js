@@ -9,12 +9,18 @@ let context, audioBuffer, features, trajectory, worker, source;
 let playing = false, offset = 0, startedAt = 0, generation = 0, fileName = 'Evolving harmonic demo';
 function audioContext() { return context ??= new AudioContext(); }
 function currentTime() { return audioBuffer ? Math.min(audioBuffer.duration, playing ? offset + context.currentTime - startedAt : offset) : 0; }
+function setWavePosition(value) {
+  const position = Math.max(0, Math.min(1, Number(value) || 0));
+  $('seek').value = position;
+  $('positionDial').style.setProperty('--position', position);
+  $('seek').setAttribute('aria-valuetext', `${Math.round(position * 100)}%`);
+}
 function stopSource() {
   if (source) { source.onended = null; source.stop(); source.disconnect(); source = undefined; }
 }
 function pause() {
   offset = currentTime(); playing = false; stopSource();
-  $('seek').value = audioBuffer?.duration ? offset / audioBuffer.duration : 0;
+  setWavePosition(audioBuffer?.duration ? offset / audioBuffer.duration : 0);
   $('play').textContent = '▶︎'; $('play').setAttribute('aria-label', 'Play');
 }
 async function play() {
@@ -183,7 +189,7 @@ function animate() {
     const time = currentTime(), frame = featuresAt(features, time);
     updateGeometry(); group.scale.setScalar(radiusForRms(frame.rms));
     group.rotation.y = rotationAt(features, trajectory, time) * Number($('direction').value);
-    $('current').textContent = timeLabel(time); $('seek').value = audioBuffer.duration ? time / audioBuffer.duration : 0;
+    $('current').textContent = timeLabel(time); setWavePosition(audioBuffer.duration ? time / audioBuffer.duration : 0);
     $('centroid').textContent = `${Math.round(frame.centroid)} Hz`;
     $('rms').textContent = `${frame.rms > 1e-6 ? (20 * Math.log10(frame.rms)).toFixed(1) : '−∞'} dB`;
     $('pitch').textContent = frame.f0 ? `${frame.f0.toFixed(1)} Hz` : 'Unvoiced';
