@@ -2,6 +2,8 @@
 
 A JUCE 9.0.3 / C++17 sample synthesizer foundation, with an independent **3D spherical spiral sound explorer**. No API keys or online analysis services are required. Dependencies are downloaded during setup; imported sound stays local.
 
+The browser explorer is automatically deployed from `main` to [passagesofpasserine.github.io/TimbreSpaceSynth](https://passagesofpasserine.github.io/TimbreSpaceSynth/). GitHub Actions runs its analysis tests and production build before each deployment.
+
 The synth builds **VST3** and **Standalone** targets. The companion explorer runs in a modern browser with WebGL and Web Audio; it is deliberately separate from the plugin.
 
 ## Run the spherical spiral explorer
