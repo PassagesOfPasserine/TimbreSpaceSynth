@@ -1,5 +1,5 @@
 // Versioned, renderer-independent, deterministic analysis. No network or ML services.
-export const SCHEMA = 'timbre-space-features/1';
+export const SCHEMA = 'timbre-space-features/2';
 export const ANALYSIS_RATE = 16000;
 export const FRAME_SIZE = 2048;
 export const HOP_SIZE = 320;
@@ -27,6 +27,34 @@ export function fftMagnitudes(input) {
     }
   }
   return Float64Array.from({ length: n / 2 + 1 }, (_, i) => Math.hypot(re[i], im[i]));
+}
+
+export function fftSpectrum(input) {
+  const n = input.length, re = Float64Array.from(input), im = new Float64Array(n);
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) [re[i], re[j]] = [re[j], re[i]];
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const angle = -2 * Math.PI / len, wr = Math.cos(angle), wi = Math.sin(angle);
+    for (let start = 0; start < n; start += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = start + k, b = a + len / 2;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        const next = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = next;
+      }
+    }
+  }
+  const magnitudes = new Float64Array(n / 2 + 1), phases = new Float64Array(n / 2 + 1);
+  for (let i = 0; i < magnitudes.length; i++) {
+    magnitudes[i] = Math.hypot(re[i], im[i]);
+    phases[i] = Math.atan2(im[i], re[i]);
+  }
+  return { magnitudes, phases };
 }
 
 // YIN difference / cumulative mean normalization with sub-sample refinement.
@@ -74,16 +102,19 @@ export function resample(input, sourceRate, targetRate = ANALYSIS_RATE) {
   return out;
 }
 
-export function analyze(mono, sampleRate, onProgress = () => {}, volumePcm = mono) {
+export function analyze(mono, sampleRate, onProgress = () => {}, volumePcm = mono, widthPcm = null, options = {}) {
   if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 384000 || !mono.length)
     throw new Error('Unsupported sample rate or empty audio.');
-  const pcm = resample(mono, sampleRate);
+  const pcm = resample(mono, sampleRate), quality = options.quality || 'balanced';
+  const hopSize = quality === 'fast' ? HOP_SIZE * 2 : quality === 'high' ? HOP_SIZE / 2 : HOP_SIZE;
   const duration = mono.length / sampleRate;
-  const times = [], rms = [], pitch = [], confidence = [], centroid = [], harmonics = [], envelope = [];
-  const count = Math.ceil(duration * ANALYSIS_RATE / HOP_SIZE);
+  const times = [], rms = [], pitch = [], confidence = [], centroid = [], harmonics = [], harmonicPhases = [];
+  const envelope = [], residual = [], transient = [], stereoWidth = [];
+  let previousMagnitudes = null;
+  const count = Math.ceil(duration * ANALYSIS_RATE / hopSize);
   for (let index = 0; index < count; index++) {
-    const center = index * HOP_SIZE, frame = new Float64Array(FRAME_SIZE), windowed = new Float64Array(FRAME_SIZE);
-    let energy = 0, volumeEnergy = 0, volumeCount = 0;
+    const center = index * hopSize, frame = new Float64Array(FRAME_SIZE), windowed = new Float64Array(FRAME_SIZE);
+    let energy = 0, volumeEnergy = 0, widthEnergy = 0, volumeCount = 0;
     // Analysis centered on the timeline, no causal-analysis delay in playback.
     for (let i = 0; i < FRAME_SIZE; i++) {
       const position = center + i - FRAME_SIZE / 2;
@@ -94,19 +125,30 @@ export function analyze(mono, sampleRate, onProgress = () => {}, volumePcm = mon
     const originalCenter = Math.round(center / ANALYSIS_RATE * sampleRate);
     const halfWindow = Math.round(sampleRate * .02);
     for (let n = Math.max(0, originalCenter - halfWindow); n < Math.min(mono.length, originalCenter + halfWindow); n++) {
-      volumeEnergy += volumePcm[n] ** 2; volumeCount++;
+      volumeEnergy += volumePcm[n] ** 2; widthEnergy += (widthPcm?.[n] || 0) ** 2; volumeCount++;
     }
     const amplitude = Math.sqrt(volumeEnergy / Math.max(1, volumeCount));
     const estimate = energy / FRAME_SIZE > 1e-8 ? estimatePitch(frame) : { f0: 0, confidence: 0 };
-    const magnitudes = fftMagnitudes(windowed);
+    const spectrum = fftSpectrum(windowed), magnitudes = spectrum.magnitudes;
     let weighted = 0, magnitudeSum = 0;
     for (let k = 1; k < magnitudes.length; k++) { weighted += magnitudes[k] * k * ANALYSIS_RATE / FRAME_SIZE; magnitudeSum += magnitudes[k]; }
-    const harmonic = Array(HARMONICS).fill(0);
+    const harmonic = Array(HARMONICS).fill(0), phase = Array(HARMONICS).fill(0);
     if (estimate.f0) for (let h = 1; h <= HARMONICS; h++) {
       const bin = Math.round(h * estimate.f0 * FRAME_SIZE / ANALYSIS_RATE);
-      if (bin > 0 && bin < magnitudes.length - 1)
+      if (bin > 0 && bin < magnitudes.length - 1) {
         harmonic[h - 1] = Math.max(magnitudes[bin - 1], magnitudes[bin], magnitudes[bin + 1]);
+        phase[h - 1] = spectrum.phases[bin];
+      }
     }
+    const spectralEnergy = magnitudes.reduce((sum, value) => sum + value * value, 0);
+    const harmonicEnergy = harmonic.reduce((sum, value) => sum + value * value, 0);
+    let flux = 0, positiveEnergy = 0;
+    if (previousMagnitudes) for (let k = 1; k < magnitudes.length; k++) {
+      const delta = magnitudes[k] - previousMagnitudes[k];
+      if (delta > 0) flux += delta * delta;
+      positiveEnergy += magnitudes[k] * magnitudes[k];
+    }
+    previousMagnitudes = magnitudes.slice();
     const harmonicSum = harmonic.reduce((a, b) => a + b, 0);
     if (harmonicSum > 1e-9) for (let h = 0; h < HARMONICS; h++) harmonic[h] /= harmonicSum;
     const bands = Array(BANDS).fill(0);
@@ -118,26 +160,34 @@ export function analyze(mono, sampleRate, onProgress = () => {}, volumePcm = mon
     const bandNorm = bands.reduce((a, b) => a + b, 0);
     if (bandNorm > 1e-9) for (let b = 0; b < BANDS; b++) bands[b] /= bandNorm;
     times.push(center / ANALYSIS_RATE); rms.push(amplitude); pitch.push(estimate.f0); confidence.push(estimate.confidence);
-    centroid.push(magnitudeSum > 1e-9 ? weighted / magnitudeSum : 0); harmonics.push(harmonic); envelope.push(bands);
+    centroid.push(magnitudeSum > 1e-9 ? weighted / magnitudeSum : 0); harmonics.push(harmonic); harmonicPhases.push(phase); envelope.push(bands);
+    residual.push(spectralEnergy > 1e-9 ? Math.max(0, Math.min(1, 1 - harmonicEnergy / spectralEnergy)) : 0);
+    transient.push(positiveEnergy > 1e-9 ? Math.max(0, Math.min(1, Math.sqrt(flux / positiveEnergy))) : 0);
+    stereoWidth.push(Math.max(0, Math.min(1, Math.sqrt(widthEnergy / Math.max(1, volumeCount)))));
     if (index % 25 === 0) onProgress(index / count);
   }
   return { schema: SCHEMA, source: { sampleRate, samples: mono.length, duration },
-    analysis: { rate: ANALYSIS_RATE, frameSize: FRAME_SIZE, hopSize: HOP_SIZE, pitchRangeHz: [40, 1000],
-      method: 'Hann FFT + normalized harmonic magnitudes + 24 log spectral bands + YIN',
+    analysis: { rate: ANALYSIS_RATE, frameSize: FRAME_SIZE, hopSize, quality, pitchRangeHz: [40, 1000],
+      method: 'Hann complex FFT + normalized harmonic magnitudes/phases + residual/flux + 24 log spectral bands + YIN',
       spectralLimitHz: 8000, rmsWindowSeconds: .04 },
-    times, rms, pitch, confidence, centroid, harmonics, envelope };
+    times, rms, pitch, confidence, centroid, harmonics, harmonicPhases, envelope, residual, transient, stereoWidth };
 }
 
 export function featuresAt(features, time) {
-  const position = Math.max(0, Math.min(features.times.length - 1, time * ANALYSIS_RATE / HOP_SIZE));
+  const position = Math.max(0, Math.min(features.times.length - 1, time * features.analysis.rate / features.analysis.hopSize));
   const a = Math.floor(position), b = Math.min(a + 1, features.times.length - 1), blend = position - a;
   const mix = (stream) => stream[a] * (1 - blend) + stream[b] * blend;
   // Do not interpolate a voiced f0 toward silence as if it were a lower note.
   const voiced = features.pitch[a] > 0 && features.pitch[b] > 0;
+  const vectors = (name, fallback = 0) => (features[name]?.[a] || Array(HARMONICS).fill(fallback))
+    .map((v, i) => v * (1 - blend) + (features[name]?.[b]?.[i] ?? v) * blend);
   return { rms: mix(features.rms), f0: voiced ? mix(features.pitch) : features.pitch[Math.round(position)],
     confidence: mix(features.confidence), centroid: mix(features.centroid),
-    harmonics: features.harmonics[a].map((v, i) => v * (1 - blend) + features.harmonics[b][i] * blend),
-    envelope: features.envelope[a].map((v, i) => v * (1 - blend) + features.envelope[b][i] * blend) };
+    residual: features.residual ? mix(features.residual) : 0,
+    transient: features.transient ? mix(features.transient) : 0,
+    stereoWidth: features.stereoWidth ? mix(features.stereoWidth) : 0,
+    harmonics: vectors('harmonics'), harmonicPhases: vectors('harmonicPhases'),
+    envelope: (features.envelope[a] || []).map((v, i) => v * (1 - blend) + features.envelope[b][i] * blend) };
 }
 
 export function makeDemo(rate = 24000, duration = 12) {

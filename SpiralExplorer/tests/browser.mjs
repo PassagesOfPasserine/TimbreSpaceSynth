@@ -8,7 +8,8 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(process.env.SPIRAL_TEST_URL || 'http://127.0.0.1:5173');
   await page.waitForFunction(() => window.spiralReady?.frames > 0, { timeout: 30000 });
-  assert.match(await page.locator('#status').textContent(), /Ready to play/);
+  assert.match(await page.locator('#status').textContent(), /spherical resynthesis ready/);
+  assert.equal(await page.evaluate(() => window.spiralReady?.resynthesis), true);
   assert.equal(await page.locator('canvas').count(), 1);
   await page.locator('#play').click(); await page.waitForTimeout(1400);
   assert.notEqual(await page.locator('#current').textContent(), '0:00');
@@ -26,11 +27,25 @@ try {
   await page.mouse.wheel(0, -150);
   await page.mouse.down({button:'right'}); await page.mouse.move(box.x + 200, box.y + 220, {steps:5}); await page.mouse.up({button:'right'});
   const downloadEvent = page.waitForEvent('download'); await page.locator('#export').click();
-  const download = await downloadEvent; assert.equal(download.suggestedFilename(), 'timbre-space-features.json');
+  const download = await downloadEvent; assert.equal(download.suggestedFilename(), 'timbre-space-model.json');
   const exported = JSON.parse(await readFile(await download.path(), 'utf8'));
-  assert.equal(exported.schema, 'timbre-space-features/1');
+  assert.equal(exported.schema, 'timbre-space-features/2');
   assert.equal(exported.times.length, exported.rms.length);
-  assert.equal(exported.harmonics[0].length, 16); assert.equal(exported.envelope[0].length, 24);
+  assert.equal(exported.harmonics[0].length, 16); assert.equal(exported.harmonicPhases[0].length, 16); assert.equal(exported.envelope[0].length, 24);
+  assert.equal(exported.residual.length, exported.times.length); assert.equal(exported.transient.length, exported.times.length);
+  await page.locator('#importTarget').selectOption('1');
+  await page.locator('#featureFile').setInputFiles({ name: 'spiral-b.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(exported)) });
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('Imported spherical sound model'));
+  assert.equal(await page.locator('#activeSource').textContent(), 'SPIRAL B');
+  await page.locator('#morph').fill('0.5'); await page.locator('#morph').dispatchEvent('input');
+  assert.equal(await page.locator('#morphValue').textContent(), '50%');
+  await page.locator('[data-panel="spiral-a"]').click();
+  await page.locator('#editHarmonics').fill('1.5'); await page.locator('#applyEdit').click();
+  assert.equal(await page.locator('#undo').isEnabled(), true);
+  await page.locator('#undo').click(); assert.equal(await page.locator('#redo').isEnabled(), true); await page.locator('#redo').click();
+  const audioDownloadEvent = page.waitForEvent('download'); await page.locator('#exportAudio').click();
+  const audioDownload = await audioDownloadEvent; assert.equal(audioDownload.suggestedFilename(), 'timbre-space-resynthesis.wav');
+  const renderedWav = await readFile(await audioDownload.path()); assert.equal(renderedWav.subarray(0, 4).toString(), 'RIFF');
   // Generate an actual RIFF PCM16 WAV and exercise browser decoding + worker import.
   const rate = 16000, samples = rate, wav = Buffer.alloc(44 + samples * 2);
   wav.write('RIFF'); wav.writeUInt32LE(wav.length - 8, 4); wav.write('WAVEfmt ', 8);
@@ -39,7 +54,7 @@ try {
   wav.write('data', 36); wav.writeUInt32LE(samples * 2, 40);
   for (let i = 0; i < samples; i++) wav.writeInt16LE(Math.round(10000 * Math.sin(2 * Math.PI * 220 * i / rate)), 44 + i * 2);
   await page.locator('#file').setInputFiles({ name: 'test-220Hz.wav', mimeType: 'audio/wav', buffer: wav });
-  await page.waitForFunction(() => document.getElementById('status').textContent.includes('test-220Hz.wav') && document.getElementById('status').textContent.includes('Ready to play'));
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('test-220Hz.wav') && document.getElementById('status').textContent.includes('resynthesis ready'));
   await page.locator('#seek').fill('0.5'); await page.locator('#seek').dispatchEvent('input');
   await page.waitForTimeout(200); assert.match(await page.locator('#pitch').textContent(), /220/);
   await page.locator('#reset').click();
@@ -54,7 +69,7 @@ try {
     const sample = wav.readInt16LE(44 + i * 2); stereo.writeInt16LE(sample, 44 + i * 4); stereo.writeInt16LE(-sample, 46 + i * 4);
   }
   await page.locator('#file').setInputFiles({ name: 'stereo-antiphase.wav', mimeType: 'audio/wav', buffer: stereo });
-  await page.waitForFunction(() => document.getElementById('status').textContent.includes('stereo-antiphase.wav') && document.getElementById('status').textContent.includes('Ready to play'));
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('stereo-antiphase.wav') && document.getElementById('status').textContent.includes('resynthesis ready'));
   await page.locator('#seek').fill('0.5'); await page.locator('#seek').dispatchEvent('input');
   await page.waitForTimeout(150);
   assert.match(await page.locator('#pitch').textContent(), /220/);
@@ -62,5 +77,5 @@ try {
   await page.locator('#file').setInputFiles({ name: 'invalid.wav', mimeType: 'audio/wav', buffer: Buffer.from('invalid') });
   await page.waitForFunction(() => document.getElementById('status').textContent.includes('Import failed'));
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: WebGL, playback, pause, orbit/pan/zoom, axes, direction, resolution, export, WAV import, seek/pitch, responsive layout, invalid-file handling.');
+  console.log('Browser checks passed: WebGL, spiral AudioWorklet transport, pause/resume, A/B model import and morph, region edit undo/redo, WAV/JSON export, WAV import, seek/pitch, responsive layout, invalid-file handling.');
 } finally { await browser.close(); }

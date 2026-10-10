@@ -1,4 +1,5 @@
 #include "Engine/Morphing.h"
+#include "Engine/SpiralResynth.h"
 #include <iostream>
 #include <cstdlib>
 void require(bool condition, const char* message) {
@@ -20,5 +21,20 @@ int main() {
         float sum = 0; for (auto v : w) { require(std::isfinite(v) && v >= 0, "finite positive weights"); sum += v; }
         require(std::abs(sum - 1) < 1e-5f, "normalized weights");
     }
-    std::cout << "5 geometry checks passed (including 10201 plane positions)\n";
+    std::vector<float> pcm(16000);
+    for (std::size_t i = 0; i < pcm.size(); ++i) pcm[i] = .3f * std::sin(2 * 3.14159265358979323846 * 261.6256 * i / 16000);
+    const auto model = timbre::analyzeSpiral(pcm, 16000);
+    require(model && model->frames.size() >= 49, "spiral frames analyzed");
+    require(model->frames[20].amplitude > .1f, "spiral amplitude extracted");
+    require(model->frames[20].harmonics[0] > .8f, "fundamental harmonic extracted");
+    timbre::SpiralOscillator oscillator; oscillator.start(48000, 261.6256f, model);
+    float peak = 0; std::array<float, 2> previous{};
+    for (int i = 0; i < 48000; ++i) {
+        const auto sample = oscillator.tick();
+        require(std::isfinite(sample[0]) && std::isfinite(sample[1]), "finite spiral output");
+        require(std::abs(sample[0] - previous[0]) < .5f, "continuous spiral output");
+        peak = std::max(peak, std::abs(sample[0])); previous = sample;
+    }
+    require(peak > .01f && peak <= 1, "audible bounded spiral output");
+    std::cout << "Geometry and native spiral resynthesis checks passed\n";
 }

@@ -7,6 +7,12 @@ export const MAPPING = {
 };
 export function radiusForRms(rms) { return 4 * Math.sqrt(Math.max(0, Math.min(1, rms))); }
 export function rotationSpeed(f0) { return 2 * Math.PI * Math.min(4, Math.max(0, f0 / 440)) * .12; }
+export function timeForSpiralPosition(model, position) {
+  return Math.max(0, Math.min(1, position)) * model.source.duration;
+}
+export function spiralPositionForTime(model, time) {
+  return model.source.duration > 0 ? Math.max(0, Math.min(1, time / model.source.duration)) : 0;
+}
 export function buildRotationTrajectory(features) {
   const trajectory = new Float64Array(features.times.length);
   for (let i = 1; i < trajectory.length; i++) trajectory[i] = trajectory[i - 1] +

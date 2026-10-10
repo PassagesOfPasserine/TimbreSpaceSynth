@@ -10,8 +10,9 @@ Validated in the current Debian x64 cloud instance with GCC 14.2, CMake 4.4.4, J
 | C++ inverse-distance geometry | Symmetry, proximity, empty slots/bank and 10,201 plane positions passed |
 | Processor behavior | Idle silence, sample-offset MIDI, sine playback, release, voice stealing/polyphony, WAV import/playback, stereo antiphase preservation, PCM state round-trip, malformed/truncated state and missing-file rejection passed |
 | JUCE editor | Created, resized, rendered to an offscreen PNG and destroyed successfully |
-| Node DSP/geometry tests | 9/9 passed |
-| Browser integration | WebGL, audio transport timeline, pause/resume controls, orbit/pan/zoom, axes, direction, resolution, feature JSON export, real PCM16 WAV decoding/import, seek-to-pitch, stereo antiphase RMS, mobile layout, invalid-file handling passed; no page errors |
+| Node DSP/geometry/resynthesis tests | 16/16 passed: pitch/RMS, complex feature streams, quality modes, mappings, immutable region edits, A/B morph, deterministic finite resynthesis, phase continuity, Nyquist suppression and WAV encoding |
+| Browser integration | WebGL, Spiral AudioWorklet transport, pause/resume, orbit/pan/zoom, projection, axes, traversal controls, A/B model import/morph, region edit undo/redo, feature JSON and rendered WAV export, real PCM16 WAV import, seek-to-pitch, stereo antiphase RMS, mobile layout and invalid-file handling passed; no page errors |
+| Portable native spiral core | PCM feature analysis and phase-continuous, deterministic, finite, bounded harmonic/residual/transient output passed in `engine_tests` |
 | Production web build | Passed; Vite warns about the approximately 506 kB uncompressed Three.js-containing bundle (128 kB gzip) |
 | Dependency audit | `npm audit`: zero reported vulnerabilities |
 | Cloud setup script | Executed end-to-end twice with signed package checks, builds, tests, frozen npm installation and production build; passed |

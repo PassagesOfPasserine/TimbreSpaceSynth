@@ -8,6 +8,8 @@
 
 `Engine/Morphing.h` defines a replaceable `MorphBackend` contract and explicitly named `SampleBlend` baseline. This contract only supplies mix weights. A future learned backend will need an additional latent-representation decoder/render contract; mix weights alone are not an AI synthesis architecture. It should integrate at the voice/source layer, leaving MIDI, envelopes, host parameters and UI independent.
 
+`Engine/SpiralResynth.h` supplies the native feature-frame model, deterministic PCM analysis and a phase-continuous, Nyquist-bounded harmonic/residual/transient oscillator. It performs no allocation during `tick()`. This portable C++ core is tested independently and is the integration boundary for the next JUCE voice/UI stage; the released native plugin still exposes its established sampler workflow.
+
 WAV decoding and allocations happen during import, not inside rendering. Atomic immutable-bank publication lets voices retain older sounds. Retired banks are reclaimed on the message thread when unreferenced, avoiding large sample-buffer destruction during note rendering. Standard-library atomic shared pointers are not guaranteed lock-free; this foundation needs real-device latency/profiling before a hard real-time guarantee. State loading is a host lifecycle operation and is not intended to run within `processBlock`.
 
 Host state embeds little-endian PCM floats with a magic/version header, bounds checks and rejection of non-finite values. Restore is transactional: malformed input preserves the previous state. Parameters are host-automatable. Envelope settings are captured at note-on; cutoff and master are smoothed while playing. Cursor mix weights update at block boundaries.
@@ -18,8 +20,11 @@ Host state embeds little-endian PCM floats with a magic/version header, bounds c
 
 - `analysis.js`: standalone pure DSP, versioned feature schema, interpolation and deterministic demo generator.
 - `analysis-worker.js`: off-main-thread analysis and progress/errors.
+- `sound-model.js`: validation, immutable region edits, smoothing, cloning and A/B feature morphing.
+- `resynthesis.js`: deterministic offline harmonic/residual/transient rendering and WAV encoding.
+- `spiral-worklet.js`: real-time phase-continuous spherical feature synthesis.
 - `geometry.js`: renderer-independent spherical mappings and seekable pitch integral.
-- `main.js`: Three.js tube mesh, OrbitControls, Web Audio transport, WAV decoding, feature export and UI bindings.
+- `main.js`: Spiral A/B state, Three.js editor, AudioWorklet/original/mix transport, undo/redo, import/export and UI bindings.
 - `style.css` / `index.html`: responsive dark workspace and accessible labeled controls.
 
-Feature storage is independent of mesh resolution and camera state. Changing resolution does not rerun audio analysis. Playback uses original decoded audio; it does not reconstruct sound from the visualization. See [mathematics](SPIRAL.md) for equations and limitations.
+Feature storage is independent of mesh resolution and camera state. Changing resolution does not rerun audio analysis. Original playback uses decoded audio; Spiral playback resynthesizes from feature frames. See [mathematics](SPIRAL.md) for equations and limitations.

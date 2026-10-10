@@ -1,10 +1,10 @@
 # Timbre Space Synth
 
-A JUCE 9.0.3 / C++17 sample synthesizer foundation, with an independent **3D spherical spiral sound explorer**. No API keys or online analysis services are required. Dependencies are downloaded during setup; imported sound stays local.
+A JUCE 9.0.3 / C++17 sample synthesizer foundation with a browser-based **3D spherical spiral resynthesizer**. No API keys or online analysis services are required. Imported sound stays local.
 
 The browser explorer is automatically deployed from `main` to [passagesofpasserine.github.io/TimbreSpaceSynth](https://passagesofpasserine.github.io/TimbreSpaceSynth/). GitHub Actions runs its analysis tests and production build before each deployment.
 
-The synth builds **VST3** and **Standalone** targets. The companion explorer runs in a modern browser with WebGL and Web Audio; it is deliberately separate from the plugin.
+The synth builds **VST3** and **Standalone** targets. The browser instrument uses WebGL, Web Audio and an AudioWorklet. Its spherical feature model drives phase-continuous harmonic, deterministic residual, and transient synthesis; it is not a renamed wavetable.
 
 ## Run the spherical spiral explorer
 
@@ -16,7 +16,9 @@ npm ci
 npm run dev
 ```
 
-Open the address printed by Vite on your own development machine. The app loads an evolving harmonic demo without autoplay. Click Play or import a standard RIFF WAV (mono/stereo, ≤120 seconds, ≤64 MB). Drag to orbit, scroll to zoom, right-drag to pan. Use the seek bar, resolution slider, rotation direction, XYZ axes, and Reset camera controls. Export extracts versioned feature JSON without source PCM.
+Open the address printed by Vite. The app loads an evolving harmonic demo without autoplay. Click Play or import a RIFF WAV (mono/stereo, ≤120 seconds, ≤64 MB). Choose Original, Spiral or Mix playback. Drag to orbit, scroll to zoom, right-drag to pan, and double-click the spiral to scrub. Region controls edit harmonics, phase twist and energy with undo/redo. Spiral A/B morphing aligns normalized feature time. Export versioned model JSON or render the resynthesis to a stereo WAV.
+
+The working vertical slice implements Spiral A/B sources, feature overlays, one-shot/loop/pendulum/freeze traversal, phase-continuous partials, residual noise, transient excitation, local model import/export and offline WAV rendering. The Sampler, Filter, macro and envelope tabs establish the intended modular workflow; their complete modulation/effects engines remain later stages.
 
 ```sh
 npm test
