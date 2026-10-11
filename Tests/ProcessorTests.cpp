@@ -74,5 +74,14 @@ int main() {
     require(imageStream && png.writeImageToStream(image, *imageStream), "offscreen UI render");
     editor->setSize(840, 620); require(editor->getWidth() == 840, "editor resize");
     editor.reset();
-    std::cout << "Processor checks passed: silence, MIDI tone, release, polyphony, WAV playback, PCM state, corrupt state, slot bounds\n";
+    TimbreProcessor additive; additive.prepareToPlay(48000, 256);
+    additive.parameters.getParameter("harmonic2")->setValueNotifyingHost(.7f);
+    additive.parameters.getParameter("stereoWidth")->setValueNotifyingHost(1.0f);
+    juce::MidiBuffer additiveMidi; additiveMidi.addEvent(juce::MidiMessage::noteOn(1, 69, 1.0f), 0);
+    juce::AudioBuffer<float> additiveOutput(2, 256); additive.processBlock(additiveOutput, additiveMidi);
+    float stereoDifference = 0;
+    for (int n = 0; n < additiveOutput.getNumSamples(); ++n)
+        stereoDifference = juce::jmax(stereoDifference, std::abs(additiveOutput.getSample(0, n) - additiveOutput.getSample(1, n)));
+    require(stereoDifference > .001f, "stereo width changes additive output");
+    std::cout << "Processor checks passed: silence, MIDI additive tone/stereo width, release, polyphony, WAV playback, PCM state, corrupt state, slot bounds\n";
 }

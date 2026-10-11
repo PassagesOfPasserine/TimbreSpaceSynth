@@ -11,7 +11,22 @@ try {
   assert.match(await page.locator('#status').textContent(), /spherical resynthesis ready/);
   assert.equal(await page.evaluate(() => window.spiralReady?.resynthesis), true);
   assert.equal(await page.locator('canvas').count(), 1);
-  await page.locator('#play').click(); await page.waitForTimeout(1400);
+  await page.locator('#synthMode').click();
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('Playable additive spiral enabled'));
+  assert.match(await page.locator('#status').textContent(), /Playable additive spiral enabled/);
+  await page.locator('#stereoWidth').fill('0.8'); await page.locator('#stereoWidth').dispatchEvent('input');
+  assert.equal(await page.locator('#widthValue').textContent(), '80%');
+  await page.locator('#harmonicEditor input').nth(1).fill('0.6'); await page.locator('#harmonicEditor input').nth(1).dispatchEvent('input');
+  await page.locator('#savePreset').click(); assert.equal(await page.locator('#preset').inputValue(), 'user');
+  await page.locator('#preset').selectOption('sine'); await page.locator('#preset').selectOption('user');
+  assert.equal(await page.locator('#harmonicEditor input').nth(1).inputValue(), '0.6');
+  await page.locator('h1').click();
+  await page.keyboard.down('a'); await page.waitForTimeout(180);
+  assert.match(await page.locator('#rms').textContent(), /% length/);
+  assert.match(await page.locator('#pitch').textContent(), /261\.6 Hz/);
+  await page.keyboard.up('a'); await page.locator('#synthMode').click();
+  await page.waitForFunction(() => document.getElementById('status').textContent.includes('Spherical resynthesis mode enabled'));
+  await page.locator('#play').click(); await page.waitForTimeout(1700);
   assert.notEqual(await page.locator('#current').textContent(), '0:00');
   await page.locator('#play').click();
   const position = await page.locator('#seek').inputValue(); await page.waitForTimeout(300);
@@ -77,5 +92,5 @@ try {
   await page.locator('#file').setInputFiles({ name: 'invalid.wav', mimeType: 'audio/wav', buffer: Buffer.from('invalid') });
   await page.waitForFunction(() => document.getElementById('status').textContent.includes('Import failed'));
   assert.deepEqual(errors, []);
-  console.log('Browser checks passed: WebGL, spiral AudioWorklet transport, pause/resume, A/B model import and morph, region edit undo/redo, WAV/JSON export, WAV import, seek/pitch, responsive layout, invalid-file handling.');
+  console.log('Browser checks passed: playable additive synth, keyboard/ADSR, harmonic and width mappings, WebGL, spiral AudioWorklet transport, A/B morph, edits, exports, WAV import, responsive layout and error handling.');
 } finally { await browser.close(); }

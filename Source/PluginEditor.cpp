@@ -54,9 +54,9 @@ void TimbreEditor::resized() {
 }
 void TimbreEditor::paint(juce::Graphics& g) {
     g.fillAll(background); g.setColour(juce::Colours::white); g.setFont(26);
-    g.drawText("TIMBRE SPACE", 24, 24, 320, 32, juce::Justification::centredLeft);
+    g.drawText("SHAPE OF SOUND", 24, 24, 320, 32, juce::Justification::centredLeft);
     g.setFont(12); g.setColour(accent);
-    g.drawText("SYNTH  /  SAMPLE BLEND FOUNDATION", 350, 28, 350, 24, juce::Justification::centredLeft);
+    g.drawText("SPHERICAL SPIRAL SYNTHESIZER", 350, 28, 350, 24, juce::Justification::centredLeft);
     for (auto r : {plane, terrain}) { g.setColour(panel); g.fillRoundedRectangle(r.expanded(12, 12).withTrimmedTop(-30), 16); }
     g.setColour(juce::Colours::white); g.setFont(14);
     g.drawText("TIMBRE PLANE | drag sounds or cursor", plane.withY(plane.getY() - 32).withHeight(22), juce::Justification::centredLeft);

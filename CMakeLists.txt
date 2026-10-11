@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(TimbreSpaceSynth VERSION 0.1.0 LANGUAGES C CXX)
+project(ShapeOfSound VERSION 0.2.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(TIMBRE_BUILD_PLUGIN "Build JUCE plugin and standalone" ON)
@@ -20,9 +20,9 @@ if(TIMBRE_BUILD_PLUGIN)
     FetchContent_MakeAvailable(JUCE)
   endif()
   juce_add_plugin(TimbreSpaceSynth COMPANY_NAME "Passages of Passerine"
-    BUNDLE_ID "com.passagesofpasserine.timbrespacesynth"
+    BUNDLE_ID "com.passagesofpasserine.shapeofsound"
     PLUGIN_MANUFACTURER_CODE PsPr PLUGIN_CODE TmSp
-    FORMATS VST3 Standalone PRODUCT_NAME "Timbre Space Synth"
+    FORMATS VST3 Standalone PRODUCT_NAME "Shape of Sound"
     IS_SYNTH TRUE NEEDS_MIDI_INPUT TRUE NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE COPY_PLUGIN_AFTER_BUILD FALSE)
   if(BUILD_TESTING)

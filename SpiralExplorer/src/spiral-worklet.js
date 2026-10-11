@@ -4,6 +4,10 @@ class SpiralProcessor extends AudioWorkletProcessor {
     this.models = [null, null]; this.playing = false; this.position = 0; this.direction = 1;
     this.phases = new Float64Array(32); this.seed = 0x51f15e; this.noiseState = 0; this.lastTransient = 0;
     this.frames = [0, 1].map(() => ({ harmonics: new Float64Array(32), phase: new Float64Array(32) }));
+    this.voices = Array.from({ length: 12 }, () => ({ active: false, held: false, note: 0, velocity: 0, level: 0, stage: 0, phases: new Float64Array(32) }));
+    this.synth = { enabled: false, harmonics: Array.from({ length: 16 }, (_, i) => i === 0 ? 1 : 0), phases: Array(16).fill(0),
+      attack: .02, decay: .18, sustain: .72, release: .35, width: .25, master: .72, tuning: 440 };
+    this.meterCounter = 0;
     this.params = { morph: 0, harmonics: 1, residual: .2, transient: .25, pitch: 1, level: .8, traversal: 'forward' };
     this.port.onmessage = ({ data }) => {
       if (data.type === 'load') this.models[data.slot] = data.model;
@@ -11,7 +15,39 @@ class SpiralProcessor extends AudioWorkletProcessor {
       if (data.type === 'play') { this.position = data.offset || 0; this.direction = data.direction || 1; this.playing = true; }
       if (data.type === 'seek') this.position = Math.max(0, data.time || 0);
       if (data.type === 'stop') this.playing = false;
+      if (data.type === 'synth') Object.assign(this.synth, data.params);
+      if (data.type === 'noteOn') this.noteOn(data.note, data.velocity ?? .8);
+      if (data.type === 'noteOff') for (const voice of this.voices) if (voice.active && voice.note === data.note) { voice.held = false; voice.stage = 3; }
+      if (data.type === 'panic') for (const voice of this.voices) voice.active = false;
     };
+  }
+  noteOn(note, velocity) {
+    let voice = this.voices.find(candidate => !candidate.active) || this.voices.reduce((a, b) => a.level < b.level ? a : b);
+    Object.assign(voice, { active: true, held: true, note, velocity, level: 0, stage: 0 }); voice.phases.fill(0);
+  }
+  synthSample() {
+    let left = 0, right = 0, activeLevel = 0;
+    const attack = Math.max(.001, this.synth.attack), decay = Math.max(.001, this.synth.decay), release = Math.max(.005, this.synth.release);
+    const width = Math.max(0, Math.min(1, this.synth.width));
+    for (const voice of this.voices) {
+      if (!voice.active) continue;
+      if (voice.stage === 0) { voice.level += 1 / (attack * sampleRate); if (voice.level >= 1) { voice.level = 1; voice.stage = 1; } }
+      else if (voice.stage === 1) { voice.level -= (1 - this.synth.sustain) / (decay * sampleRate); if (voice.level <= this.synth.sustain) { voice.level = this.synth.sustain; voice.stage = 2; } }
+      else if (voice.stage === 3) { voice.level -= Math.max(.000001, voice.level) / (release * sampleRate); if (voice.level < .0001) { voice.active = false; voice.level = 0; continue; } }
+      const f0 = this.synth.tuning * 2 ** ((voice.note - 69) / 12); let l = 0, r = 0;
+      for (let h = 0; h < 32; h++) {
+        const amplitude = Number(this.synth.harmonics[h] || 0), frequency = f0 * (h + 1);
+        if (!amplitude || frequency >= sampleRate * .48) continue;
+        voice.phases[h] += 2 * Math.PI * frequency / sampleRate;
+        if (voice.phases[h] >= 2 * Math.PI) voice.phases[h] -= 2 * Math.PI;
+        const phase = voice.phases[h] + Number(this.synth.phases[h] || 0);
+        const spread = Math.min(1.2, width * (h + 1) * .12);
+        l += amplitude * Math.sin(phase - spread); r += amplitude * Math.sin(phase + spread);
+      }
+      const gain = voice.level * voice.velocity; left += l * gain; right += r * gain; activeLevel = Math.max(activeLevel, voice.level);
+    }
+    this.sampleLeft = Math.tanh(left * this.synth.master); this.sampleRight = Math.tanh(right * this.synth.master);
+    this.activeLevel = activeLevel;
   }
   scalar(stream, a, b, part) {
     return (stream?.[a] || 0) * (1 - part) + (stream?.[b] ?? stream?.[a] ?? 0) * part;
@@ -34,6 +70,11 @@ class SpiralProcessor extends AudioWorkletProcessor {
   }
   process(_inputs, outputs) {
     const output = outputs[0], left = output[0], right = output[1] || output[0];
+    if (this.synth.enabled) {
+      let peak = 0;
+      for (let i = 0; i < left.length; i++) { this.synthSample(); left[i] = this.sampleLeft; right[i] = this.sampleRight; peak = Math.max(peak, this.activeLevel); }
+      if (++this.meterCounter >= 8) { this.meterCounter = 0; this.port.postMessage({ type: 'meter', envelope: peak }); } return true;
+    }
     if (!this.playing || !this.models[0]) { left.fill(0); if (right !== left) right.fill(0); return true; }
     const a = this.frames[0], b = this.frames[1];
     for (let i = 0; i < left.length; i++) {

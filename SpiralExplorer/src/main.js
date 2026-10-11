@@ -1,4 +1,5 @@
 import './style.css';
+import './shape-synth.css';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { featuresAt, makeDemo } from './analysis.js';
@@ -12,6 +13,8 @@ const slots = [emptySlot('Spiral A'), emptySlot('Spiral B')];
 function emptySlot(name) { return { name, model: null, originalModel: null, buffer: null, trajectory: null, undo: [], redo: [] }; }
 let activeSlot = 0, context, synthNode, synthGain, originalSource, originalGain, worker;
 let playing = false, offset = 0, startedAt = 0, generation = 0, mode = 'spiral', currentTool = 'select', playDirection = 1;
+let playableSynth = false, envelopeLevel = 0, visualNote = 69;
+const synthState = { harmonics: Array.from({ length: 16 }, (_, i) => i === 0 ? 1 : 0), phases: Array(16).fill(0) };
 
 function slot() { return slots[activeSlot]; }
 function currentDuration() { return slot().model?.source.duration || slot().buffer?.duration || 0; }
@@ -24,6 +27,7 @@ async function ensureSynth() {
   await audio.audioWorklet.addModule(new URL('./spiral-worklet.js', import.meta.url));
   synthNode = new AudioWorkletNode(audio, 'spiral-processor', { outputChannelCount: [2] });
   synthGain = audio.createGain(); synthNode.connect(synthGain).connect(audio.destination);
+  synthNode.port.onmessage = ({ data }) => { if (data.type === 'meter') envelopeLevel = data.envelope; };
   syncSynthModels(); updateSynthParams();
 }
 function syncSynthModels() {
@@ -36,6 +40,10 @@ function synthParams() {
     traversal: $('traversal').value, level: mode === 'mix' ? .55 : .8 };
 }
 function updateSynthParams() { if (synthNode) synthNode.port.postMessage({ type: 'params', params: synthParams() }); }
+function playableParams() { return { enabled: playableSynth, harmonics: synthState.harmonics, phases: synthState.phases,
+  attack: Number($('attack').value), decay: Number($('decay').value), sustain: Number($('sustain').value), release: Number($('release').value),
+  width: Number($('stereoWidth').value), master: Number($('synthMaster').value), tuning: 440 }; }
+function updatePlayableParams() { synthNode?.port.postMessage({ type: 'synth', params: playableParams() }); updateGeometry(true); }
 function stopSources() {
   if (originalSource) { originalSource.onended = null; try { originalSource.stop(); } catch {} originalSource.disconnect(); originalSource = null; }
   synthNode?.port.postMessage({ type: 'stop' });
@@ -168,7 +176,8 @@ $('redo').onclick = () => { const entry = slot(); if (!entry.redo.length) return
 document.querySelectorAll('[data-mode]').forEach(button => button.onclick = () => { mode = button.dataset.mode; document.querySelectorAll('[data-mode]').forEach(item => item.classList.toggle('active', item === button)); updateSynthParams(); status(`${button.textContent} playback selected.`); });
 document.querySelectorAll('[data-panel]').forEach(button => button.onclick = () => {
   document.querySelectorAll('[data-panel]').forEach(item => item.classList.toggle('active', item === button));
-  if (button.dataset.panel === 'spiral-a' || button.dataset.panel === 'spiral-b') { pause(); activeSlot = button.dataset.panel === 'spiral-a' ? 0 : 1; offset = 0; refreshUI(); }
+  if (button.dataset.panel === 'synth') { $('synthMode').click(); }
+  else if (button.dataset.panel === 'spiral-a' || button.dataset.panel === 'spiral-b') { if (playableSynth) $('synthMode').click(); pause(); activeSlot = button.dataset.panel === 'spiral-a' ? 0 : 1; offset = 0; refreshUI(); }
   else status(`${button.textContent.trim()} panel is part of the modular signal path; the working vertical slice focuses on Spiral A/B.`);
 });
 document.querySelectorAll('[data-tool]').forEach(button => button.onclick = () => { currentTool = button.dataset.tool; document.querySelectorAll('[data-tool]').forEach(item => item.classList.toggle('active', item === button)); if (currentTool === 'smooth' && slot().model) $('smoothEdit').click(); });
@@ -176,6 +185,43 @@ for (const [id, output, format] of [['morph','morphValue',v=>`${v*100|0}%`],['ha
   $(id).oninput = () => { $(output).value = format(Number($(id).value)); updateSynthParams(); };
 }
 $('traversal').onchange = updateSynthParams;
+
+const presets = {
+  sine: [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  warm: [1,.48,.26,.13,.08,.05,.03,.02,.01,0,0,0,0,0,0,0],
+  bright: [1,.72,.55,.44,.34,.28,.22,.18,.14,.1,.08,.06,.04,.03,.02,.01],
+  hollow: [1,0,.48,0,.27,0,.16,0,.1,0,.06,0,.04,0,.02,0],
+};
+function rebuildHarmonicEditor() {
+  $('harmonicEditor').replaceChildren(...synthState.harmonics.map((value, index) => {
+    const label = document.createElement('label'); label.title = `Harmonic ${index + 1}: ${Math.round(value * 100)}%`;
+    const input = document.createElement('input'); input.type = 'range'; input.min = 0; input.max = 1; input.step = .01; input.value = value;
+    input.setAttribute('aria-label', `Harmonic ${index + 1}`); input.oninput = () => { synthState.harmonics[index] = Number(input.value); label.title = `Harmonic ${index + 1}: ${Math.round(input.value * 100)}%`; updatePlayableParams(); };
+    const number = document.createElement('span'); number.textContent = index + 1; label.append(input, number); return label;
+  }));
+}
+function loadPreset(name) {
+  const saved=name==='user'&&localStorage.getItem('shape-of-sound-preset')?JSON.parse(localStorage.getItem('shape-of-sound-preset')):null;
+  synthState.harmonics=[...(saved?.harmonics||presets[name])];synthState.phases=[...(saved?.phases||Array(16).fill(0))];
+  if(saved)for(const key of ['attack','decay','sustain','release'])$(key).value=saved[key];
+  if(saved){$('stereoWidth').value=saved.width;$('synthMaster').value=saved.master;}
+  rebuildHarmonicEditor();updatePlayableParams();status(`${$('preset').selectedOptions[0].textContent} timbre loaded.`);
+}
+$('preset').onchange = () => loadPreset($('preset').value);
+$('savePreset').onclick = () => { localStorage.setItem('shape-of-sound-preset', JSON.stringify({ ...playableParams(), name: 'User Spiral' })); $('preset').querySelector('[value="user"]').disabled=false; $('preset').value='user'; status('Preset saved in this browser and available as User preset.'); };
+$('synthMode').onclick = async () => { playableSynth = !playableSynth; await ensureSynth(); pause(); synthNode.port.postMessage({ type: 'panic' }); updatePlayableParams(); $('synthMode').textContent = playableSynth ? 'Playable synth on' : 'Enable playable synth'; $('synthMode').classList.toggle('active', playableSynth); status(playableSynth ? 'Playable additive spiral enabled. Use the keyboard or connect MIDI.' : 'Spherical resynthesis mode enabled.'); };
+for (const [id, output, format] of [['stereoWidth','widthValue',v=>`${Math.round(v*100)}%`],['synthMaster','masterValue',v=>`${Math.round(v*100)}%`],['attack','attackValue',v=>`${Math.round(v*1000)} ms`],['decay','decayValue',v=>`${Math.round(v*1000)} ms`],['sustain','sustainValue',v=>`${Math.round(v*100)}%`],['release','releaseValue',v=>`${Math.round(v*1000)} ms`]]) {
+  $(id).oninput = () => { $(output).value = format(Number($(id).value)); updatePlayableParams(); };
+}
+const keyboardNotes = [60,62,64,65,67,69,71,72,74,76,77,79,81], keyboardMap = { a:60,s:62,d:64,f:65,g:67,h:69,j:71,k:72 };
+function noteOn(note, velocity=.8) { if (!playableSynth) $('synthMode').click(); ensureSynth().then(() => { visualNote = note; synthNode.port.postMessage({ type:'noteOn', note, velocity }); }); document.querySelector(`[data-note="${note}"]`)?.classList.add('down'); }
+function noteOff(note) { synthNode?.port.postMessage({ type:'noteOff', note }); document.querySelector(`[data-note="${note}"]`)?.classList.remove('down'); }
+for (const note of keyboardNotes) { const key=document.createElement('button'); key.dataset.note=note; key.className='key'; key.textContent=['C','D','E','F','G','A','B'][[0,2,4,5,7,9,11].indexOf(note%12)] || '•'; key.onpointerdown=e=>{e.preventDefault();key.setPointerCapture(e.pointerId);noteOn(note)}; key.onpointerup=()=>noteOff(note); key.onpointercancel=()=>noteOff(note); $('keyboard').append(key); }
+const heldKeys = new Set(); window.addEventListener('keydown', event => { const note=keyboardMap[event.key.toLowerCase()]; if (note != null && !heldKeys.has(event.key)) { heldKeys.add(event.key); noteOn(note); } });
+window.addEventListener('keyup', event => { const note=keyboardMap[event.key.toLowerCase()]; if (note != null) { heldKeys.delete(event.key); noteOff(note); } });
+$('midiAccess').onclick = async () => { if (!navigator.requestMIDIAccess) return status('Web MIDI is unavailable in this browser.'); try { const access=await navigator.requestMIDIAccess(); for (const input of access.inputs.values()) input.onmidimessage=event=>{const [command,note,velocity]=event.data;if((command&0xf0)===0x90&&velocity)noteOn(note,velocity/127);else if((command&0xf0)===0x80||((command&0xf0)===0x90&&!velocity))noteOff(note)}; status(`Connected ${access.inputs.size} MIDI input${access.inputs.size===1?'':'s'}.`); } catch(error) { status(`MIDI access failed: ${error.message}`); } };
+rebuildHarmonicEditor();
+if(localStorage.getItem('shape-of-sound-preset'))$('preset').querySelector('[value="user"]').disabled=false;
 
 const scene = new THREE.Scene(), perspective = new THREE.PerspectiveCamera(42, 1, .01, 100), orthographic = new THREE.OrthographicCamera(-5, 5, 5, -5, .01, 100);
 perspective.position.set(5, 3.5, 7); orthographic.position.copy(perspective.position); let camera = perspective;
@@ -187,6 +233,7 @@ $('reset').onclick = () => { camera.position.set(5, 3.5, 7); controls.target.set
 $('projection').onclick = () => { camera = camera === perspective ? orthographic : perspective; camera.position.copy(controls.object.position); controls.object = camera; $('projection').textContent = camera === perspective ? 'Orthographic' : 'Perspective'; resize(); };
 const axes = new THREE.AxesHelper(3); axes.visible = false; scene.add(axes); $('axes').onchange = () => { axes.visible = $('axes').checked; };
 scene.add(new THREE.AmbientLight(0xa2e4ef, 1.2)); const light = new THREE.DirectionalLight(0xc3fff1, 3); light.position.set(3, 5, 4); scene.add(light); const rim = new THREE.DirectionalLight(0xa48afe, 2); rim.position.set(-4, -1, -4); scene.add(rim);
+const boundary = new THREE.Mesh(new THREE.SphereGeometry(4, 32, 20), new THREE.MeshBasicMaterial({ color:0x315064, wireframe:true, transparent:true, opacity:.13 })); scene.add(boundary);
 const group = new THREE.Group(); scene.add(group); let mesh, geometry, resolution = 4096, centers, positions, normals, colors; const sides = 6;
 function configureGeometry() {
   resolution = Number($('resolution').value); $('resolutionValue').value = resolution;
@@ -209,17 +256,31 @@ function updateColors() {
 let lastGeometryTime = -1;
 function updateGeometry(force = false) {
   if (!slot().model || !geometry) return; const time = currentTime(); if (!force && Math.abs(time-lastGeometryTime)<1/30) return; lastGeometryTime=time;
-  spiralVertices(slot().model,time,resolution,centers); const tangent=new THREE.Vector3(),normal=new THREE.Vector3(),binormal=new THREE.Vector3(),up=new THREE.Vector3();
-  for(let i=0;i<resolution;i++){const before=Math.max(0,i-1)*3,after=Math.min(resolution-1,i+1)*3;tangent.set(centers[after]-centers[before],centers[after+1]-centers[before+1],centers[after+2]-centers[before+2]).normalize();up.set(0,1,0);if(Math.abs(tangent.y)>.95)up.set(1,0,0);normal.crossVectors(tangent,up).normalize();binormal.crossVectors(tangent,normal).normalize();for(let j=0;j<sides;j++){const angle=2*Math.PI*j/sides,c=Math.cos(angle),s=Math.sin(angle),p=(i*sides+j)*3,nx=normal.x*c+binormal.x*s,ny=normal.y*c+binormal.y*s,nz=normal.z*c+binormal.z*s;positions[p]=centers[i*3]+.007*nx;positions[p+1]=centers[i*3+1]+.007*ny;positions[p+2]=centers[i*3+2]+.007*nz;normals[p]=nx;normals[p+1]=ny;normals[p+2]=nz;}}
+  spiralVertices(slot().model,time,resolution,centers);
+  if(playableSynth) for(let i=0;i<resolution;i++){const u=i/(resolution-1),theta=Math.PI*u,phi=2*Math.PI*MAPPING.turns*u;let deformation=0;for(let h=1;h<synthState.harmonics.length;h++)deformation+=synthState.harmonics[h]*Math.sin((h+1)*phi+synthState.phases[h])/(h+1);const scale=4*(1+.42*deformation*Math.sin(theta));centers[i*3]*=scale;centers[i*3+1]*=scale;centers[i*3+2]*=scale;}
+  const thickness=playableSynth ? .004+.026*Number($('stereoWidth').value) : .007, tangent=new THREE.Vector3(),normal=new THREE.Vector3(),binormal=new THREE.Vector3(),up=new THREE.Vector3();
+  for(let i=0;i<resolution;i++){const before=Math.max(0,i-1)*3,after=Math.min(resolution-1,i+1)*3;tangent.set(centers[after]-centers[before],centers[after+1]-centers[before+1],centers[after+2]-centers[before+2]).normalize();up.set(0,1,0);if(Math.abs(tangent.y)>.95)up.set(1,0,0);normal.crossVectors(tangent,up).normalize();binormal.crossVectors(tangent,normal).normalize();for(let j=0;j<sides;j++){const angle=2*Math.PI*j/sides,c=Math.cos(angle),s=Math.sin(angle),p=(i*sides+j)*3,nx=normal.x*c+binormal.x*s,ny=normal.y*c+binormal.y*s,nz=normal.z*c+binormal.z*s;positions[p]=centers[i*3]+thickness*nx;positions[p+1]=centers[i*3+1]+thickness*ny;positions[p+2]=centers[i*3+2]+thickness*nz;normals[p]=nx;normals[p+1]=ny;normals[p+2]=nz;}}
+  geometry.setDrawRange(0,Math.max(0,Math.floor((resolution-1)*(playableSynth?envelopeLevel:1))*sides*6));
   geometry.attributes.position.needsUpdate=true;geometry.attributes.normal.needsUpdate=true;
 }
 const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
 renderer.domElement.addEventListener('dblclick', event => { if (!mesh || !slot().model) return; const box=renderer.domElement.getBoundingClientRect();pointer.set((event.clientX-box.left)/box.width*2-1,-((event.clientY-box.top)/box.height)*2+1);raycaster.setFromCamera(pointer,camera);const hit=raycaster.intersectObject(mesh)[0];if(hit){const index=Math.floor((hit.face.a/sides)/(resolution-1)*1000)/1000;$('seek').value=index;$('seek').dispatchEvent(new Event('input'));} });
+let directEdit = null;
+renderer.domElement.addEventListener('pointerdown', event => {
+  if (!['brush','twist'].includes(currentTool) || !mesh || !slot().model) return;
+  const box=renderer.domElement.getBoundingClientRect();pointer.set((event.clientX-box.left)/box.width*2-1,-((event.clientY-box.top)/box.height)*2+1);raycaster.setFromCamera(pointer,camera);const hit=raycaster.intersectObject(mesh)[0];if(!hit)return;
+  const center=(hit.face.a/sides)/(resolution-1), entry=slot(); directEdit={ y:event.clientY, center, base:entry.model, tool:currentTool }; entry.undo.push(entry.model); entry.redo=[]; controls.enabled=false; renderer.domElement.setPointerCapture(event.pointerId); event.preventDefault();
+});
+renderer.domElement.addEventListener('pointermove', event => {
+  if(!directEdit)return; const amount=Math.max(-1,Math.min(1,(directEdit.y-event.clientY)/120)), start=Math.max(0,directEdit.center-.04), end=Math.min(1,directEdit.center+.04);
+  slot().model=editRegion(directEdit.base,start,end,directEdit.tool==='brush'?{harmonics:1+amount*.85}:{twist:amount*Math.PI});slot().trajectory=buildRotationTrajectory(slot().model);syncSynthModels();updateGeometry(true);status(`Direct ${directEdit.tool} edit · ${Math.round(directEdit.center*100)}% along spiral`);
+});
+renderer.domElement.addEventListener('pointerup', event => { if(!directEdit)return;directEdit=null;controls.enabled=true;try{renderer.domElement.releasePointerCapture(event.pointerId)}catch{}refreshUI(); });
 function resize(){const width=$('viewport').clientWidth,height=$('viewport').clientHeight;renderer.setSize(width,height);perspective.aspect=width/height;perspective.updateProjectionMatrix();const aspect=width/height;orthographic.left=-4*aspect;orthographic.right=4*aspect;orthographic.top=4;orthographic.bottom=-4;orthographic.updateProjectionMatrix();}
 new ResizeObserver(resize).observe($('viewport'));
 function refreshUI() {
   const entry=slot(), ready=!!entry.model;$('activeSource').textContent=`SPIRAL ${activeSlot?'B':'A'}`;$('filename').textContent=entry.name;$('frameCount').textContent=ready?`${entry.model.times.length} FRAMES`:'— FRAMES';$('duration').textContent=` / ${timeLabel(currentDuration())}`;$('undo').disabled=!entry.undo.length;$('redo').disabled=!entry.redo.length;setBusy(false);updateColors();updateGeometry(true);
   document.querySelectorAll('[data-panel]').forEach((button,index)=>button.classList.toggle('active',index===activeSlot));
 }
-function animate(){requestAnimationFrame(animate);controls.update();if(slot().model){const time=currentTime(),frame=featuresAt(slot().model,time);if(playing&&((playDirection>0&&time>=currentDuration())||(playDirection<0&&time<=0))){playing=false;stopSources();$('play').textContent='▶︎';}updateGeometry();group.scale.setScalar(radiusForRms(frame.rms));group.rotation.y=rotationAt(slot().model,slot().trajectory,time)*Number($('direction').value);$('current').textContent=timeLabel(time);setWavePosition(currentDuration()?time/currentDuration():0);$('centroid').textContent=`${Math.round(frame.centroid)} Hz`;$('rms').textContent=`${frame.rms>1e-6?(20*Math.log10(frame.rms)).toFixed(1):'−∞'} dB`;$('pitch').textContent=frame.f0?`${frame.f0.toFixed(1)} Hz`:'Unvoiced';$('residualMeter').textContent=`${Math.round(frame.residual*100)}%`;}renderer.render(scene,camera);}
+function animate(){requestAnimationFrame(animate);controls.update();if(slot().model){const time=currentTime(),frame=featuresAt(slot().model,time);if(playing&&((playDirection>0&&time>=currentDuration())||(playDirection<0&&time<=0))){playing=false;stopSources();$('play').textContent='▶︎';}updateGeometry();if(playableSynth&&geometry)geometry.setDrawRange(0,Math.max(0,Math.floor((resolution-1)*envelopeLevel)*sides*6));group.scale.setScalar(playableSynth?1:radiusForRms(frame.rms));group.rotation.y=playableSynth?performance.now()/1000*(440*2**((visualNote-69)/12))/35:rotationAt(slot().model,slot().trajectory,time)*Number($('direction').value);$('current').textContent=timeLabel(time);setWavePosition(currentDuration()?time/currentDuration():0);$('centroid').textContent=`${Math.round(frame.centroid)} Hz`;$('rms').textContent=playableSynth?`${Math.round(envelopeLevel*100)}% length`:`${frame.rms>1e-6?(20*Math.log10(frame.rms)).toFixed(1):'−∞'} dB`;$('pitch').textContent=playableSynth?`${(440*2**((visualNote-69)/12)).toFixed(1)} Hz`:frame.f0?`${frame.f0.toFixed(1)} Hz`:'Unvoiced';$('residualMeter').textContent=playableSynth?`${Math.round(Number($('stereoWidth').value)*100)}% width`:`${Math.round(frame.residual*100)}%`;}renderer.render(scene,camera);}
 configureGeometry();animate();loadDemo();

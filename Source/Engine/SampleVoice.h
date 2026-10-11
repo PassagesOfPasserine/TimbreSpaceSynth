@@ -13,6 +13,7 @@ struct Voice {
     int note = 0, channel = 1;
     float velocity = 0;
     double phase = 0, oscillatorIncrement = 0;
+    std::array<double, 8> harmonicPhases{};
     std::array<double, 4> positions{}, increments{};
     std::array<float, 4> blendWeights{};
     std::shared_ptr<const Bank> bank;
@@ -21,13 +22,14 @@ struct Voice {
                std::shared_ptr<const Bank> b) {
         oscillatorIncrement = juce::MathConstants<double>::twoPi * juce::MidiMessage::getMidiNoteInHertz(n) / rate;
         active = held = true; note = n; channel = ch; velocity = v;
-        phase = 0; positions.fill(0); bank = std::move(b);
+        phase = 0; harmonicPhases.fill(0); positions.fill(0); bank = std::move(b);
         for (size_t i = 0; i < 4; ++i) increments[i] = bank->samples[i] ?
             std::pow(2.0, (note - 60) / 12.0) * bank->samples[i]->rate / rate : 0;
         envelope.setSampleRate(rate); envelope.setParameters(adsr); envelope.reset(); envelope.noteOn();
     }
     void release() { held = false; envelope.noteOff(); }
-    std::array<float, 2> tick(const std::array<float, 4>& weights) {
+    std::array<float, 2> tick(const std::array<float, 4>& weights,
+                              const std::array<float, 8>& harmonics = {1,0,0,0,0,0,0,0}, float stereoWidth = 0) {
         std::array<float, 2> value{}; bool hasSample = false;
         for (std::size_t i = 0; i < 4; ++i) if (bank->samples[i]) {
             hasSample = true; const auto& s = *bank->samples[i];
@@ -44,9 +46,14 @@ struct Voice {
             positions[i] += increments[i];
         }
         if (!hasSample) {
-            value.fill(static_cast<float>(std::sin(phase)));
-            phase += oscillatorIncrement;
-            if (phase > juce::MathConstants<double>::twoPi) phase -= juce::MathConstants<double>::twoPi;
+            for (std::size_t h = 0; h < harmonics.size(); ++h) {
+                const auto increment = oscillatorIncrement * static_cast<double>(h + 1);
+                harmonicPhases[h] += increment;
+                if (harmonicPhases[h] > juce::MathConstants<double>::twoPi) harmonicPhases[h] -= juce::MathConstants<double>::twoPi;
+                const auto spread = juce::jmin(1.2f, juce::jlimit(0.0f, 1.0f, stereoWidth) * static_cast<float>(h + 1) * .12f);
+                value[0] += harmonics[h] * static_cast<float>(std::sin(harmonicPhases[h] - spread));
+                value[1] += harmonics[h] * static_cast<float>(std::sin(harmonicPhases[h] + spread));
+            }
         }
         const auto gain = envelope.getNextSample();
         if (!envelope.isActive()) { active = false; bank.reset(); }

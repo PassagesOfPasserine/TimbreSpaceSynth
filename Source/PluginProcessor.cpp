@@ -11,6 +11,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout TimbreProcessor::layout() {
     add("cutoff", "Low-pass", 30, 20000, 12000); add("volume", "Master", 0, 1, .7f);
     add("lfoRate", "LFO rate", .1f, 15, 1); add("lfoDepth", "LFO filter depth", 0, 1, 0);
     add("cursorX", "Cursor X", 0, 1, .5f); add("cursorY", "Cursor Y", 0, 1, .5f);
+    add("stereoWidth", "Spiral thickness / stereo width", 0, 1, .25f);
+    for (int i = 0; i < 8; ++i) {
+        auto id = "harmonic" + juce::String(i + 1);
+        add(id.toRawUTF8(), id.toRawUTF8(), 0, 1, i == 0 ? 1.0f : 0.0f);
+    }
     for (int i = 0; i < 4; ++i) {
         auto x = "pointX" + juce::String(i), y = "pointY" + juce::String(i);
         add(x.toRawUTF8(), x.toRawUTF8(), 0, 1, (i % 2) ? .8f : .2f);
@@ -20,7 +25,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout TimbreProcessor::layout() {
 }
 TimbreProcessor::TimbreProcessor()
  : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-   parameters(*this, nullptr, "TimbreSpaceState", layout()), bank(std::make_shared<timbre::Bank>()) { startTimer(1000); }
+   parameters(*this, nullptr, "TimbreSpaceState", layout()), bank(std::make_shared<timbre::Bank>()) {
+    for (int i = 0; i < 4; ++i) {
+        pointXParams[static_cast<std::size_t>(i)] = parameters.getRawParameterValue("pointX" + juce::String(i));
+        pointYParams[static_cast<std::size_t>(i)] = parameters.getRawParameterValue("pointY" + juce::String(i));
+    }
+    for (int i = 0; i < 8; ++i) harmonicParams[static_cast<std::size_t>(i)] = parameters.getRawParameterValue("harmonic" + juce::String(i + 1));
+    stereoWidthParam = parameters.getRawParameterValue("stereoWidth"); startTimer(1000);
+}
 bool TimbreProcessor::isBusesLayoutSupported(const BusesLayout& b) const {
     return b.getMainInputChannelSet().isDisabled() &&
        (b.getMainOutputChannelSet() == juce::AudioChannelSet::stereo() ||
@@ -61,10 +73,13 @@ void TimbreProcessor::processBlock(juce::AudioBuffer<float>& out, juce::MidiBuff
     keyboard.processNextMidiBuffer(midi, 0, out.getNumSamples(), true);
     std::array<timbre::Point, 4> points;
     for (int i = 0; i < 4; ++i) {
-        points[static_cast<size_t>(i)] = {param(("pointX" + juce::String(i)).toRawUTF8()),
-                                       param(("pointY" + juce::String(i)).toRawUTF8())};
+        points[static_cast<size_t>(i)] = {pointXParams[static_cast<std::size_t>(i)]->load(),
+                                       pointYParams[static_cast<std::size_t>(i)]->load()};
     }
     const timbre::Point cursor{param("cursorX"), param("cursorY")};
+    std::array<float, 8> harmonicShape{};
+    for (int i = 0; i < 8; ++i) harmonicShape[static_cast<std::size_t>(i)] = harmonicParams[static_cast<std::size_t>(i)]->load();
+    const float stereoWidth = stereoWidthParam->load();
     auto updateWeights = [&](timbre::Voice& v) {
         std::array<bool, 4> active{};
         for (size_t i = 0; i < 4; ++i) active[i] = bool(v.bank->samples[i]);
@@ -80,7 +95,7 @@ void TimbreProcessor::processBlock(juce::AudioBuffer<float>& out, juce::MidiBuff
         }
         std::array<float, 2> signal{};
         for (auto& v : voices) if (v.active) {
-            const auto sample = v.tick(v.blendWeights);
+            const auto sample = v.tick(v.blendWeights, harmonicShape, stereoWidth);
             for (size_t ch = 0; ch < 2; ++ch) signal[ch] += sample[ch];
         }
         lfoPhase += juce::MathConstants<double>::twoPi * param("lfoRate") / sampleRateHz;

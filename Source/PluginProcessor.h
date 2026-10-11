@@ -12,7 +12,7 @@ public:
     bool isBusesLayoutSupported(const BusesLayout&) const override;
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
-    const juce::String getName() const override { return "Timbre Space Synth"; }
+    const juce::String getName() const override { return "Shape of Sound"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 5; }
@@ -37,10 +37,13 @@ private:
     float param(const char* id) const { return parameters.getRawParameterValue(id)->load(); }
     std::shared_ptr<const timbre::Bank> bank;
     std::array<timbre::Voice, 16> voices;
+    std::array<std::atomic<float>*, 4> pointXParams{}, pointYParams{};
+    std::array<std::atomic<float>*, 8> harmonicParams{};
     timbre::SampleBlend morph;
     juce::dsp::StateVariableTPTFilter<float> filter;
     juce::SmoothedValue<float> master, cutoff;
     double sampleRateHz = 44100, lfoPhase = 0;
+    std::atomic<float>* stereoWidthParam = nullptr;
     bool sustain[17]{};
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(TimbreProcessor)
 };

@@ -4,7 +4,7 @@
 
 `PluginProcessor` owns host parameters, MIDI handling, the sixteen-voice pool, keyboard state, global low-pass filter, smoothed master gain, and versioned state serialization. MIDI events execute at their sample offsets. Sustain CC64 and all-notes/all-sound-off are supported. Output is mono or stereo; there is no input bus.
 
-`Engine/SampleVoice.h` owns immutable sample data and per-note playback state. Note-on snapshots a sample bank, resets positions and ADSR, and computes sample-rate/pitch increments. Each voice sums interpolated sample values with the geometry-derived weights, or uses a sine when its bank is empty. Stereo samples retain both channels; mono samples are duplicated to stereo. Mono output averages the channels. Voice allocation uses the first free slot and steals slot zero when full; a production stealing/click-suppression policy is future work.
+`Engine/SampleVoice.h` owns immutable sample data and per-note playback state. Note-on snapshots a sample bank, resets positions, additive phases and ADSR, and computes sample-rate/pitch increments. Each empty-bank voice performs eight-partial additive synthesis; host parameters control each harmonic and stereo width introduces matching left/right phase spread. A loaded voice instead sums interpolated sample values with geometry-derived weights. Stereo samples retain both channels; mono samples are duplicated to stereo. Mono output averages the channels. Voice allocation uses the first free slot and steals slot zero when full; a production stealing/click-suppression policy is future work.
 
 `Engine/Morphing.h` defines a replaceable `MorphBackend` contract and explicitly named `SampleBlend` baseline. This contract only supplies mix weights. A future learned backend will need an additional latent-representation decoder/render contract; mix weights alone are not an AI synthesis architecture. It should integrate at the voice/source layer, leaving MIDI, envelopes, host parameters and UI independent.
 
@@ -22,9 +22,11 @@ Host state embeds little-endian PCM floats with a magic/version header, bounds c
 - `analysis-worker.js`: off-main-thread analysis and progress/errors.
 - `sound-model.js`: validation, immutable region edits, smoothing, cloning and A/B feature morphing.
 - `resynthesis.js`: deterministic offline harmonic/residual/transient rendering and WAV encoding.
-- `spiral-worklet.js`: real-time phase-continuous spherical feature synthesis.
+- `spiral-worklet.js`: real-time phase-continuous spherical feature resynthesis plus a twelve-voice additive MIDI engine with ADSR and stereo phase spread.
 - `geometry.js`: renderer-independent spherical mappings and seekable pitch integral.
-- `main.js`: Spiral A/B state, Three.js editor, AudioWorklet/original/mix transport, undo/redo, import/export and UI bindings.
+- `main.js`: Spiral A/B state, Three.js editor, direct brush/twist editing, Web MIDI/on-screen keyboard, parameter-to-geometry mappings, AudioWorklet/original/mix transport, undo/redo, import/export and UI bindings.
 - `style.css` / `index.html`: responsive dark workspace and accessible labeled controls.
 
 Feature storage is independent of mesh resolution and camera state. Changing resolution does not rerun audio analysis. Original playback uses decoded audio; Spiral playback resynthesizes from feature frames. See [mathematics](SPIRAL.md) for equations and limitations.
+
+In playable mode, the renderer and worklet receive the same harmonic vector. Harmonics above the fundamental create deterministic radial deformation. The envelope meter controls mesh draw range (active arc length), stereo width controls tube radius and partial phase spread, and the current MIDI note controls oscillator frequency plus a deliberately slowed visual rotation. Audio processing never depends on the Three.js frame rate.
